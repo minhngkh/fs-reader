@@ -1,7 +1,7 @@
 add_executable(fs-reader 
   "main.cpp"
   "Drive.cpp"
-  "Utils.cpp" "NTFS.cpp" "Utils-impl.cpp" "UI.cpp" "Scroller.cpp")
+  "Utils.cpp" "NTFS.cpp"  "UI.cpp" "Scroller.cpp")
 
 target_link_libraries(fs-reader
   PRIVATE ftxui::screen

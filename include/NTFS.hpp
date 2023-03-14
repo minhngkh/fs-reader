@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -9,7 +10,14 @@
 
 namespace Ntfs {
 
-struct FilePermissons {
+enum class MftEntryAvailability { InUse, NotInUse, Invalid };
+
+struct DataRun {
+  QWORD clusterCount;
+  QWORD firstCluster;
+};
+
+struct FileAttr {
   bool readOnly = false;
   bool hidden = false;
   bool system = false;
@@ -23,36 +31,44 @@ struct FilePermissons {
   bool offline = false;
   bool notContentIndexed = false;
   bool encrypted = false;
+  bool directory = false;
+  bool indexView = false;
 };
 
 // Only necessary information is actually saved
 struct AttributeHeader {
-  bool isNonResident;
+  bool isNonResident = false;
   std::string name;
 };
 struct StandardInformationAttribute {
   AttributeHeader header;
-  FilePermissons filePermissons;
+
+  QWORD createdTime;
+  QWORD modifiedTime;
 };
 
 struct FileNameAttribute {
   AttributeHeader header;
-  std::string fileName;
+
+  Index parent;  // 6 first byte
+  FileAttr fileAttr;
+  std::vector<BYTE> fileName;
+  bool containsUnicode = false;
 };
 
 struct DataAttribute {
   AttributeHeader header;
 
   // if it's resident
-  std::vector<BYTE> contentInEntry;
+  DWORD residentDataSize;
 
   // if it's non resident
-  BYTE size;
-  WORD clusterCount;
-  std::array<BYTE, 3> firstCluster;
+  QWORD realSize;
+  std::vector<DataRun> dataRuns;
 };
 
 struct MftEntryHeader {
+  DWORD id;
   bool isInUse = false;
   bool isDirectory = false;
 };
@@ -61,8 +77,8 @@ struct MftEntry {
   MftEntryHeader header;
 
   StandardInformationAttribute stdInfoAttr;
-  std::vector<DataAttribute> dataAttr;
   FileNameAttribute fileNameAttr;
+  std::vector<DataAttribute> dataAttrs;
 };
 
 // This represent a file or directory
@@ -108,7 +124,8 @@ class Reader {
   PBS pbs;
   bool hasRead = false;
 
-  MftEntry readMftEntry(Index id);
+  MftEntryAvailability readMftEntry(Index id, MftEntry& entry);
+  // DataRun readBitmap(std::ifstream& bitmapStream);
 
  public:
   Reader() = default;
@@ -119,7 +136,8 @@ class Reader {
 
   void read(Drive drive);
   void refresh();
-  DirectoryNode genDirTree();
+  DirectoryNode generateDirectoryTree();
+  std::string readFile(const DirectoryNode& file);
 };
 
 }  // namespace Ntfs

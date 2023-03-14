@@ -1,6 +1,9 @@
 #include "Utils.hpp"
 
+#include <date.h>
+
 #include <algorithm>
+#include <chrono>
 #include <iomanip>
 #include <iterator>
 #include <sstream>
@@ -73,6 +76,22 @@ T readLittleEndianVal(const std::vector<BYTE> &byteArr, int start) {
   return result;
 }
 
+Index readLittleEndianVal(const std::vector<BYTE> &byteArr, int start,
+                          int length) {
+  /*Index result;
+  std::copy(byteArr.begin() + start, byteArr.begin() + start + length,
+            (BYTE *)&result);*/
+
+  const int bitsPerByte = 8;
+
+  Index result = 0;
+  for (int i = start; i < start + length; i++) {
+    result |= (byteArr[i] << ((i - start) * bitsPerByte));
+  }
+
+  return result;
+}
+
 template BYTE readLittleEndianVal(const std::vector<BYTE> &, int);
 template WORD readLittleEndianVal(const std::vector<BYTE> &, int);
 template DWORD readLittleEndianVal(const std::vector<BYTE> &, int);
@@ -85,26 +104,38 @@ template DWORD readLittleEndianVal(const Sector &, int);
 template QWORD readLittleEndianVal(const Sector &, int);
 
 std::string readString(const Sector &sector, int start, int length) {
-  std::string result;
-  std::copy_n(sector.begin() + start, length, std::back_inserter(result));
+  // std::string result;
+  // std::copy_n(sector.begin() + start, length, std::back_inserter(result));
 
-  return result;
+  return std::string(sector.begin() + start, sector.begin() + start + length);
 }
 
 std::string readString(const std::vector<BYTE> &byteArr, int start,
                        int length) {
-  std::string result;
-  std::copy_n(byteArr.begin() + start, length, std::back_inserter(result));
+  // std::string result;
+  // std::copy_n(byteArr.begin() + start, length, std::back_inserter(result));
 
-  return result;
+  return std::string(byteArr.begin() + start, byteArr.begin() + start + length);
 }
 
-std::vector<BYTE> readByteArr(const const Sector &sector, int start,
-                              int length) {
-  std::vector<BYTE> result;
-  std::copy_n(sector.begin() + start, length, std::back_inserter(result));
+std::vector<BYTE> readRawString(const std::vector<BYTE> &byteArr, int start,
+                                int length) {
+  return std::vector<BYTE>(byteArr.begin() + start,
+                           byteArr.begin() + start + length);
+}
 
-  return result;
+std::vector<BYTE> readRawWString(const std::vector<BYTE> &byteArr, int start,
+                                 int length) {
+  return std::vector<BYTE>(byteArr.begin() + start,
+                           byteArr.begin() + start + length);
+}
+
+std::vector<BYTE> readByteArr(const Sector &sector, int start, int length) {
+  // std::vector<BYTE> result;
+  // std::copy_n(sector.begin() + start, length, std::back_inserter(result));
+
+  return std::vector<BYTE>(sector.begin() + start,
+                           sector.begin() + start + length);
 }
 
 std::string formatHexStr(std::string str) {
@@ -150,6 +181,35 @@ std::string toHexStr(std::string str) {
   }
 
   return formatHexStr(builder.str());
+}
+
+std::chrono::system_clock::time_point filetimeToSystemclock(
+    std::uint64_t fileTime) {
+  using namespace std;
+  using namespace std::chrono;
+  // filetime_duration has the same layout as FILETIME; 100ns intervals
+  using filetime_duration = duration<int64_t, ratio<1, 10000000>>;
+  // January 1, 1601 (NT epoch) - January 1, 1970 (Unix epoch):
+  constexpr duration<int64_t> nt_to_unix_epoch{INT64_C(-11644473600)};
+
+  const filetime_duration asDuration{static_cast<int64_t>(fileTime)};
+  const auto withUnixEpoch = asDuration + nt_to_unix_epoch;
+  return system_clock::time_point{
+      duration_cast<system_clock::duration>(withUnixEpoch)};
+}
+
+std::string filetimeToFormattedString(std::uint64_t fileTime) {
+  return date::format("%F %R", filetimeToSystemclock(fileTime));
+}
+
+int countSetBits(int N) {
+  int count = 0;
+
+  // (1 << i) = pow(2, i)
+  for (int i = 0; i < sizeof(int) * 8; i++) {
+    if (N & (1 << i)) count++;
+  }
+  return count;
 }
 
 }  // namespace Utils

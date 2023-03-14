@@ -14,7 +14,7 @@ using std::string;
 void Drive::configure(string drive) {
   if (Utils::getOSName() == Utils::OS::Windows) {
     std::stringstream builder;
-    builder << R"(\\.\)" << drive << ":";
+    builder << R"(\\.\)" << drive << R"(:)";
 
     this->driveAccess = builder.str();
 
@@ -22,7 +22,7 @@ void Drive::configure(string drive) {
   }
 
   Sector sector;
-  this->readSector(0, sector);
+  readSector(0, sector);
 
   std::string oemID = Utils::readString(sector, 0x03, sizeof(QWORD));
 
@@ -36,12 +36,22 @@ void Drive::configure(string drive) {
 void Drive::readSector(Index readPoint, Sector &sector) {
   std::ifstream driveStream(this->driveAccess, std::ios::binary);
 
-  if (driveStream.fail()) throw std::runtime_error("Unable to access");
+  if (!driveStream) throw std::runtime_error("Unable to access");
 
-  driveStream.seekg(readPoint, std::ios::beg);
+  Index offset = readPoint * 512;
+  if (!driveStream.seekg(offset, std::ios::beg)) {
+    throw std::runtime_error("Reach the end of the file");
+  }
   driveStream.read((char *)sector.data(), sector.size());
+}
 
-  driveStream.close();
+void Drive::readSector(Index readPoint, std::ifstream& ifs) {
+  ifs.open(this->driveAccess, std::ios::binary);
+
+  if (!ifs) throw std::runtime_error("Unable to access");
+
+  Index offset = readPoint * 512;
+  ifs.seekg(offset, std::ios::beg);
 }
 
 FileSystem Drive::getFileSystem() { return this->fileSytem; }

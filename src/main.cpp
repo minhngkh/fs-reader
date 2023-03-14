@@ -13,13 +13,18 @@
 using namespace std;
 
 int main() {
+  // displayInputScreen();
+
   Drive drive;
   drive.configure("D");
 
-  Sector sector;
-  drive.readSector(0, sector);
+  Ntfs::Reader reader;
+  reader.read(drive);
 
-  /*for (int i = 0; i < 512; i++) {
+  /*Sector sector;
+  drive.readSector(8000000, sector);
+
+  for (int i = 0; i < 512; i++) {
     std::cout << std::hex << std::setw(2) << std::setfill('0')
               << sector[i] % 256 << " ";
     if (i % 16 == 15) {
@@ -27,16 +32,7 @@ int main() {
     }
   }*/
 
-  cout << "---------- 02" << endl;
-
-  NtfsReader reader;
-  reader.read(drive);
-
-  NtfsPbs pbs = reader.getPbs();
-
-  system("cls");
-
-  displayInputScreen();
+  reader.generateDirectoryTree();
 
   return 0;
 }
