@@ -7,6 +7,7 @@
 #include <iterator>
 #include <map>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "Drive.hpp"
 #include "Global.hpp"
@@ -50,6 +51,14 @@ void Reader::read(Drive drive) {
     pbs.bpb.BytesPerIndexBlock = {true, (int)std::pow(2, -temp)};
   };
 
+  // Calculate entry size
+  if (pbs.bpb.BytesPerFileRecordSegment.first = true) {
+    entrySize = (pbs.bpb.BytesPerFileRecordSegment.second / 512);
+  } else {
+    entrySize =
+        pbs.bpb.clustersPerFileRecordSegment * pbs.bpb.sectorsPerCluster;
+  }
+
   hasRead = true;
 }
 
@@ -76,15 +85,6 @@ MftEntryAvailability Reader::readMftEntry(Index sectorNum, MftEntry &entry) {
 
   // --- Get the whole entry ---
   std::vector<BYTE> entryRaw;
-
-  int entrySize;
-
-  if (pbs.bpb.BytesPerFileRecordSegment.first = true) {
-    entrySize = (pbs.bpb.BytesPerFileRecordSegment.second / 512);
-  } else {
-    entrySize =
-        pbs.bpb.clustersPerFileRecordSegment * pbs.bpb.sectorsPerCluster;
-  }
 
   entryRaw.reserve(entrySize);
 
@@ -247,11 +247,12 @@ MftEntryAvailability Reader::readMftEntry(Index sectorNum, MftEntry &entry) {
           int firstClusterInfoSize = allocatedBytes / 16;
 
           dataRun.clusterCount = Utils::readLittleEndianVal(
-              entryRaw, firstAttrOffset + dataOffset + 0x1,
+              entryRaw, firstAttrOffset + dataOffset + offsetWithinData + 0x1,
               clusterCountInfoSize);
           dataRun.firstCluster = Utils::readLittleEndianVal(
               entryRaw,
-              firstAttrOffset + dataOffset + 0x1 + clusterCountInfoSize,
+              firstAttrOffset + dataOffset + offsetWithinData + 0x1 +
+                  clusterCountInfoSize,
               firstClusterInfoSize);
 
           dataAttr.dataRuns.push_back(dataRun);
@@ -324,49 +325,205 @@ MftEntryAvailability Reader::readMftEntry(Index sectorNum, MftEntry &entry) {
 //     if (entryNum == pbs.bpb.sectorsPerCluster) }
 // }
 
-DirectoryNode Reader::generateDirectoryTree() {
+std::vector<DataRun> Reader::getEntrySegments() {
+  if (!hasRead) {
+    throw std::runtime_error("No drive has been read");
+  }
+
+  QWORD sectorNum = pbs.bpb.MftClusterNum * pbs.bpb.sectorsPerCluster;
+
+  // --- Get the whole entry ---
+  std::vector<BYTE> entryRaw;
+  std::vector<DataRun> result;
+
+  entryRaw.reserve(entrySize);
+
+  bool isInvalidEntry = false;
+  for (int i = 0; i < entrySize; ++i) {
+    Sector sector;
+    curDrive.readSector(sectorNum + i, sector);
+    entryRaw.insert(entryRaw.end(), sector.begin(), sector.end());
+  }
+
+  WORD firstAttrOffset = Utils::readLittleEndianVal<WORD>(entryRaw, 0x14);
+
+  while (firstAttrOffset < 512 - sizeof(DWORD)) {
+    DWORD attrTypeID =
+        Utils::readLittleEndianVal<DWORD>(entryRaw, firstAttrOffset);
+
+    if (attrTypeID == 0xFFFFFFFF) break;
+    if (attrTypeID != 0x80) {
+      DWORD attrLength =
+          Utils::readLittleEndianVal<DWORD>(entryRaw, firstAttrOffset + 0x4);
+
+      firstAttrOffset += attrLength;
+      continue;
+    }
+
+    WORD dataOffset =
+        Utils::readLittleEndianVal<WORD>(entryRaw, firstAttrOffset + 0x20);
+
+    int offsetWithinData = 0;
+    BYTE allocatedBytes = Utils::readLittleEndianVal<BYTE>(
+        entryRaw, firstAttrOffset + dataOffset + offsetWithinData);
+
+    while (allocatedBytes != 0) {
+      DataRun dataRun;
+
+      int clusterCountInfoSize = allocatedBytes % 16;
+      int firstClusterInfoSize = allocatedBytes / 16;
+
+      dataRun.clusterCount = Utils::readLittleEndianVal(
+          entryRaw, firstAttrOffset + dataOffset + offsetWithinData + 0x1,
+          clusterCountInfoSize);
+      dataRun.firstCluster = Utils::readLittleEndianVal(
+          entryRaw,
+          firstAttrOffset + dataOffset + offsetWithinData + 0x1 +
+              clusterCountInfoSize,
+          firstClusterInfoSize);
+
+      result.push_back(dataRun);
+
+      offsetWithinData += clusterCountInfoSize + firstClusterInfoSize + 1;
+      allocatedBytes = Utils::readLittleEndianVal<BYTE>(
+          entryRaw, firstAttrOffset + dataOffset + offsetWithinData);
+    }
+
+    break;
+  }
+
+  return result;
+}
+
+MftEntryAvailability Reader::createNode(Index sectorNum, HashMap &map) {
+  if (!hasRead) {
+    throw std::runtime_error("No drive has been read");
+  }
+
+  // --- Get the whole entry ---
+  std::vector<BYTE> entryRaw;
+
+  entryRaw.reserve(entrySize);
+
+  bool isInvalidEntry = false;
+  for (int i = 0; i < entrySize; ++i) {
+    Sector sector;
+    curDrive.readSector(sectorNum + i, sector);
+
+    if (i == 0) {
+      // Check if this is an actual entry/record
+      std::string signature = Utils::readString(sector, 0, sizeof(DWORD));
+      if (signature != "FILE") {
+        isInvalidEntry = true;
+        break;
+      }
+    }
+
+    entryRaw.insert(entryRaw.end(), sector.begin(), sector.end());
+  }
+
+  if (isInvalidEntry) return MftEntryAvailability::Invalid;
+
+  WORD flags = Utils::readLittleEndianVal<WORD>(entryRaw, 0x16);
+  if (!(flags & 1))
+    return MftEntryAvailability::NotInUse;  // No purpose of continue reading
+
+  // --- Create child node ---
+  DWORD childTempId = Utils::readLittleEndianVal<DWORD>(entryRaw, 0x2C);
+
+  DirectoryNode *child;
+  // Child node hasn't exist
+  if (map.find(childTempId) == map.end()) {
+    child = new DirectoryNode;
+    child->id = childTempId;
+    if (flags & (1 << 1)) child->isDirectory = true;
+    map[child->id] = child;
+  } else {  // Child was add as an parent before
+    child = map[childTempId];
+  }
+
+  WORD firstAttrOffset = Utils::readLittleEndianVal<WORD>(entryRaw, 0x14);
+
+  // --- Read Parent data ---
+
+  while (firstAttrOffset < 512 - sizeof(DWORD)) {
+    DWORD attrTypeID =
+        Utils::readLittleEndianVal<DWORD>(entryRaw, firstAttrOffset);
+
+    if (attrTypeID == 0xFFFFFFFF) break;
+    if (attrTypeID != 0x30) {
+      DWORD attrLength =
+          Utils::readLittleEndianVal<DWORD>(entryRaw, firstAttrOffset + 0x4);
+
+      firstAttrOffset += attrLength;
+    }
+
+    // $FILE_NAME
+
+    // --- header ---
+    DWORD attrLength =
+        Utils::readLittleEndianVal<DWORD>(entryRaw, firstAttrOffset + 0x4);
+    WORD dataOffset =
+        Utils::readLittleEndianVal<WORD>(entryRaw, firstAttrOffset + 0x14);
+
+    // --- attribute ---
+
+    // --- Create parent node ---
+    Index parentTempID =
+        Utils::readLittleEndianVal(entryRaw, firstAttrOffset + dataOffset, 6);
+
+    // parent node exists
+    if (map.find(parentTempID) != map.end()) {
+      map[parentTempID]->children.push_back(child->id);
+    } else {
+      DirectoryNode *parent = new DirectoryNode;
+      parent->id = parentTempID;
+      parent->isDirectory = true;
+      parent->children.push_back(child->id);
+
+      map[parentTempID] = parent;
+    }
+    break;
+  }
+
+  return MftEntryAvailability::InUse;
+}
+
+void Reader::generateDirectoryTree(HashMap &map) {
   DirectoryNode test;
 
-  int totalEntries = 0;
-  std::vector<int> skips;
+  DirectoryNode *root = new DirectoryNode;
+  root->id = 5;
+  map[5] = root;
+  std::vector<DataRun> segments = getEntrySegments();
 
-  int start = 786432 * pbs.bpb.sectorsPerCluster;
-  int end = start + 256 * pbs.bpb.sectorsPerCluster;
+  QWORD relativeCluster = 0;
+  for (DataRun &segment : segments) {
+    relativeCluster += segment.firstCluster;
+    int start = relativeCluster * pbs.bpb.sectorsPerCluster + 36;
+    int end = start + segment.clusterCount * pbs.bpb.sectorsPerCluster;
 
-  for (int i = start + 36; i < start; i += 2) {
-    MftEntry entry;
-    system("cls");
+    for (int i = start; i < end; i += 2) {
+      createNode(i, map);
+    }
+  }
+}
 
-    if (readMftEntry(i, entry) == MftEntryAvailability::InUse) {
-      std::cout << "Read " << i;
-      ++totalEntries;
-    } else {
-      std::cout << "SKIP " << i;
-      skips.push_back(i);
+std::string Reader::readFile(MftEntry entry) {
+  std::string result;
+
+  for (DataAttribute &da : entry.dataAttrs) {
+    // Choose the unnamed data stream
+    if (!da.header.name.empty()) continue;
+
+    QWORD relativeCluster = 0;
+
+    for (DataRun &dr : da.dataRuns) {
+      relativeCluster += dr.firstCluster;
     }
   }
 
-  start = 1223021 * pbs.bpb.sectorsPerCluster;
-  end = start + 768 * pbs.bpb.sectorsPerCluster;
-  for (int i = start; i < start + 768; i += 2) {
-    MftEntry entry;
-    system("cls");
-    if (readMftEntry(i, entry) == MftEntryAvailability::InUse) {
-      std::cout << "Read " << i;
-      ++totalEntries;
-    } else {
-      std::cout << "SKIP " << i;
-      skips.push_back(i);
-    }
-  }
-
-  std::cout << "---------" << std::endl
-            << totalEntries << " - " << skips.size() << " - ";
-  for (auto skip : skips) {
-    std::cout << skip << ", ";
-  }
-
-  return test;
+  return result;
 }
 
 // DataRun Reader::readBitmap(std::ifstream &bitmapStream) {

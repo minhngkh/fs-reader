@@ -24,6 +24,9 @@
 
 using namespace ftxui;
 
+Table generate
+
+
 Table generateTable(Ntfs::PBS pbs, std::string perFileRecordSegment,
                     std::string perIndexBlock, Component &button) {
   auto table = Table(
@@ -263,7 +266,8 @@ void displayDriveInfoScreen(Drive drive) {
   });
 
   
-
+  // --- DIRECTORY TAB ---
+  
   Component test = Renderer([] {
     return vbox({
         text(L"Test"),

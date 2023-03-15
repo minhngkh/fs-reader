@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Drive.hpp"
@@ -83,9 +84,12 @@ struct MftEntry {
 
 // This represent a file or directory
 struct DirectoryNode {
-  MftEntry cur;
-  std::vector<DirectoryNode> children;
+  Index id;
+  bool isDirectory = false;
+  std::vector<Index> children;
 };
+
+typedef std::unordered_map<Index, DirectoryNode*> HashMap;
 
 // BIOS Parameter Block
 struct BPB {
@@ -123,9 +127,12 @@ class Reader {
   Drive curDrive;
   PBS pbs;
   bool hasRead = false;
+  int entrySize;
 
   MftEntryAvailability readMftEntry(Index id, MftEntry& entry);
   // DataRun readBitmap(std::ifstream& bitmapStream);
+  std::vector<DataRun> Reader::getEntrySegments();
+  MftEntryAvailability createNode(Index sectorNum, HashMap& map);
 
  public:
   Reader() = default;
@@ -136,8 +143,8 @@ class Reader {
 
   void read(Drive drive);
   void refresh();
-  DirectoryNode generateDirectoryTree();
-  std::string readFile(const DirectoryNode& file);
+  void Reader::generateDirectoryTree(HashMap& map);
+  std::string Reader::readFile(MftEntry entry);
 };
 
 }  // namespace Ntfs
