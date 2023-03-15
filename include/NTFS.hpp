@@ -129,7 +129,6 @@ class Reader {
   bool hasRead = false;
   int entrySize;
 
-  MftEntryAvailability readMftEntry(Index id, MftEntry& entry);
   // DataRun readBitmap(std::ifstream& bitmapStream);
   std::vector<DataRun> Reader::getEntrySegments();
   MftEntryAvailability createNode(Index sectorNum, HashMap& map);
@@ -145,6 +144,8 @@ class Reader {
   void refresh();
   void Reader::generateDirectoryTree(HashMap& map);
   std::string Reader::readFile(MftEntry entry);
+  void getSectorNum(Index entryId);
+  MftEntryAvailability readMftEntry(Index id, MftEntry& entry);
 };
 
 }  // namespace Ntfs

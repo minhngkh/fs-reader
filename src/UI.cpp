@@ -16,6 +16,7 @@
 #include <vector>
 #include <functional>
 #include "Scroller.hpp"
+#include <sstream>
 
 #include "Drive.hpp"
 #include "IReader.hpp"
@@ -24,7 +25,78 @@
 
 using namespace ftxui;
 
-Table generate
+struct File {
+  bool isDirectory = false;
+  std::wstring name;
+  std::string dateModified;
+  std::string status;
+  int size;
+  int sectorNum;
+};
+
+struct Directory {
+  Ntfs::DirectoryNode parent;
+  std::vector<File> children;
+};
+
+void readDirectory(Ntfs::DirectoryNode root, Ntfs::Reader reader) {
+  for (auto &child : root.children) {
+    Ntfs::MftEntry entry;
+    if (reader.readMftEntry(child, entry) ==
+        Ntfs::MftEntryAvailability::InUse) {
+      File f;
+      f.isDirectory = entry.header.isDirectory;
+
+      if (entry.fileNameAttr.containsUnicode = true) {
+        f.name = std::wstring(entry.fileNameAttr.fileName.begin(),
+                              entry.fileNameAttr.fileName.end());
+      } else {
+        std::string name(entry.fileNameAttr.fileName.begin(),
+                         entry.fileNameAttr.fileName.end());
+        f.name = Utils::StringToWString(name);
+      }
+
+      f.dateModified =
+          Utils::filetimeToFormattedString(entry.stdInfoAttr.modifiedTime);
+
+      Ntfs::FileAttr &status = entry.fileNameAttr.fileAttr;
+      std::stringstream builder;
+      if (status.readOnly) builder << "read-only, ";
+      if (status.hidden) builder << "hidden, ";
+      if (status.system) builder << "system, ";
+      if (status.archive) builder << "archive, ";
+      if (status.device) builder << "device, ";
+      if (status.normal) builder << "normal, ";
+      if (status.temporary) builder << "temporary, ";
+      if (status.sparseFile) builder << "sparseFile, ";
+      if (status.reparsePoint) builder << "reparsePoint, ";
+      if (status.compressed) builder << "compressed, ";
+      if (status.offline) builder << "offline, ";
+      if (status.notContentIndexed) builder << "notContentIndexed, ";
+      if (status.encrypted) builder << "encrypted, ";
+      if (status.indexView) builder << "indexView, ";
+      
+      f.status = builder.str();
+      if (!f.status.empty()) f.status.erase(f.status.end() - 1);
+
+      if (entry.dataAttrs[0].dataRuns.size() == 0) {
+        f.size = entry.dataAttrs[0].residentDataSize;
+      } else {
+        f.size = entry.dataAttrs[0].realSize;
+      }
+
+      f.sectorNum = reader.getSectorNum(child);
+    }
+  }
+}
+
+Component getBackButton() {
+  auto button = Button("Back", [] { return true; });
+  button |= color(Color::Red);
+  
+  return button;
+}
+
 
 
 Table generateTable(Ntfs::PBS pbs, std::string perFileRecordSegment,
@@ -366,4 +438,73 @@ void displayInputScreen() {
   });
 
   screen.Loop(renderer);
+}
+
+void test() {
+  std::vector<std::string> entries = {
+      "entry 1",
+      "entry 2",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+      "entry 3",
+
+  };
+  int menu_1_selected = 0;
+  int menu_2_selected = 0;
+ 
+  bool menu_1_show = false;
+  bool menu_2_show = false;
+
+  
+
+  Components list;
+  {
+    list.push_back(Checkbox("Show menu_1", &menu_1_show));
+    list.push_back(Radiobox(&entries, &menu_1_selected) | border |
+                   Maybe(&menu_1_show));
+    list.push_back(Checkbox("Show menu_2", &menu_2_show));
+    list.push_back(Radiobox(&entries, &menu_2_selected) | border |
+                   Maybe(&menu_2_show));
+    list.push_back(
+        Renderer(list[0], [&] {
+          return text("You found the secret combinaison!") | color(Color::Red);
+        }) |
+        Maybe([&] { return menu_1_selected == 1 && menu_2_selected == 2; }));
+
+    list.push_back(Renderer([&] {
+      return hbox(text("wef") | size(WIDTH, LESS_THAN, 10),
+                  text("fwe") | size(WIDTH, LESS_THAN, 20));
+    }));
+
+   
+  }
+  
+  int selected = 0;
+  auto layout = Container::Vertical(list, &selected);
+  auto ren = Renderer(
+      layout, [&] { 
+      if (menu_1_show) {
+        displayInputScreen();
+      }
+      return layout->Render() | vscroll_indicator | frame; });
+ 
+  auto screen = ScreenInteractive::TerminalOutput();
+  screen.Loop(ren);
 }

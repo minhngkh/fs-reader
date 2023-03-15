@@ -13,7 +13,8 @@
 using namespace std;
 
 int main() {
-  displayInputScreen();
+  // test();
+  test();
 
   return 0;
 }

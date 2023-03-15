@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+#include <codecvt>
+#include <locale>
 #include <string>
 #include <vector>
 
@@ -47,5 +49,15 @@ std::chrono::system_clock::time_point filetimeToSystemclock(
 std::string filetimeToFormattedString(std::uint64_t fileTime);
 
 int countSetBits(int N);
+
+std::wstring StringToWString(std::string str) {
+  std::wstring result;
+
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  std::string narrow = converter.to_bytes(result);
+  std::wstring wide = converter.from_bytes(str);
+
+  return result;
+}
 
 }  // namespace Utils
